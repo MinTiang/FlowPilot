@@ -105,8 +105,11 @@
             },
             plus: {
               plusModeEnabled: false,
-              plusPaymentMethod: 'paypal',
+              plusPaymentMethod: 'paypal-hosted',
               plusAccountAccessStrategy: 'oauth',
+              hostedCheckoutVerificationUrl: '',
+              hostedCheckoutPhoneNumber: '',
+              plusHostedCheckoutOauthDelaySeconds: 3,
             },
             autoRun: {
               stepExecutionRange: {
@@ -317,6 +320,24 @@
                 ?? nested?.flows?.openai?.plus?.plusAccountAccessStrategy
                 ?? defaults.flows.openai.plus.plusAccountAccessStrategy
               ),
+              hostedCheckoutVerificationUrl: String(
+                input?.hostedCheckoutVerificationUrl
+                ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationUrl
+                ?? defaults.flows.openai.plus.hostedCheckoutVerificationUrl
+              ).trim(),
+              hostedCheckoutPhoneNumber: String(
+                input?.hostedCheckoutPhoneNumber
+                ?? nested?.flows?.openai?.plus?.hostedCheckoutPhoneNumber
+                ?? defaults.flows.openai.plus.hostedCheckoutPhoneNumber
+              ).trim(),
+              plusHostedCheckoutOauthDelaySeconds: (() => {
+                const numeric = Number(
+                  input?.plusHostedCheckoutOauthDelaySeconds
+                  ?? nested?.flows?.openai?.plus?.plusHostedCheckoutOauthDelaySeconds
+                  ?? defaults.flows.openai.plus.plusHostedCheckoutOauthDelaySeconds
+                );
+                return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusHostedCheckoutOauthDelaySeconds)));
+              })(),
             },
             autoRun: {
               stepExecutionRange: normalizeStepExecutionRangeEntry(
@@ -456,6 +477,9 @@
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
+      next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
+      next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
+      next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;
       next.mailProvider = normalizedState.services.email.provider;
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;
       next.ipProxyService = normalizedState.services.proxy.provider;

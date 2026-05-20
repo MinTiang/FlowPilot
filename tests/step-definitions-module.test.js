@@ -14,6 +14,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
     phoneSignupReloginAfterBindEmailEnabled: true,
   });
   const plusSteps = api.getSteps({ plusModeEnabled: true });
+  const hostedSteps = api.getSteps({ plusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' });
   const plusPhoneSteps = api.getSteps({ plusModeEnabled: true, signupMethod: 'phone' });
   const plusPhoneReloginSteps = api.getSteps({
     plusModeEnabled: true,
@@ -212,6 +213,27 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(plusSteps[7].title, 'PayPal 登录与授权');
 
   assert.deepStrictEqual(
+    hostedSteps.map((step) => step.key),
+    [
+      'open-chatgpt',
+      'submit-signup-email',
+      'fill-password',
+      'fetch-signup-code',
+      'fill-profile',
+      'plus-checkout-create',
+      'oauth-login',
+      'fetch-login-code',
+      'confirm-oauth',
+      'platform-verify',
+    ]
+  );
+  assert.equal(hostedSteps.some((step) => step.key === 'plus-checkout-billing'), false);
+  assert.equal(hostedSteps.some((step) => step.key === 'paypal-approve'), false);
+  assert.equal(hostedSteps.some((step) => step.key === 'plus-checkout-return'), false);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' }), 10);
+
+  assert.deepStrictEqual(
     goPaySteps.map((step) => step.key),
     [
       'open-chatgpt',
@@ -278,6 +300,16 @@ test('Plus session strategy swaps the OAuth tail for a single SUB2API import nod
       },
       previousNodeId: 'plus-checkout-return',
       expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    },
+    {
+      label: 'paypal-hosted',
+      options: {
+        plusModeEnabled: true,
+        plusPaymentMethod: 'paypal-hosted',
+        plusAccountAccessStrategy: 'sub2api_codex_session',
+      },
+      previousNodeId: 'plus-checkout-create',
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7],
     },
     {
       label: 'gopay',
@@ -359,6 +391,16 @@ test('Plus session strategy swaps the OAuth tail for a single CPA import node', 
       },
       previousNodeId: 'plus-checkout-return',
       expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    },
+    {
+      label: 'paypal-hosted',
+      options: {
+        plusModeEnabled: true,
+        plusPaymentMethod: 'paypal-hosted',
+        plusAccountAccessStrategy: 'cpa_codex_session',
+      },
+      previousNodeId: 'plus-checkout-create',
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7],
     },
     {
       label: 'gopay',

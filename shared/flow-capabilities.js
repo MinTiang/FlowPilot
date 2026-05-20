@@ -378,24 +378,31 @@
       const requestedPlusAccountAccessStrategy = normalizePlusAccountAccessStrategy(
         options?.plusAccountAccessStrategy ?? state?.plusAccountAccessStrategy
       );
+      const basePlusAccountAccessStrategies = [
+        PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
+        PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION,
+        PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION,
+      ];
       const availablePlusAccountAccessStrategies = activeFlowId === 'openai'
         && Boolean(flowState.supportsPlusMode)
         && Boolean(runtimeLocks.plusModeEnabled)
         && effectiveSignupMethod === SIGNUP_METHOD_EMAIL
-        ? (
-          Array.isArray(targetState.supportedPlusAccountAccessStrategies)
-            && targetState.supportedPlusAccountAccessStrategies.length > 0
-            ? targetState.supportedPlusAccountAccessStrategies.slice()
-            : [PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH]
-        )
+        ? (runtimeLocks.accountContribution
+          ? [PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION]
+          : basePlusAccountAccessStrategies)
         : [PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH];
-      const effectivePlusAccountAccessStrategy = availablePlusAccountAccessStrategies.includes(requestedPlusAccountAccessStrategy)
+      const effectivePlusAccountAccessStrategy = runtimeLocks.accountContribution
+        && runtimeLocks.plusModeEnabled
+        && effectiveSignupMethod === SIGNUP_METHOD_EMAIL
+        ? PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION
+        : availablePlusAccountAccessStrategies.includes(requestedPlusAccountAccessStrategy)
         ? requestedPlusAccountAccessStrategy
         : PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
       const canEditPlusAccountAccessStrategy = activeFlowId === 'openai'
         && Boolean(flowState.supportsPlusMode)
         && Boolean(runtimeLocks.plusModeEnabled)
         && effectiveSignupMethod === SIGNUP_METHOD_EMAIL
+        && !runtimeLocks.accountContribution
         && availablePlusAccountAccessStrategies.length > 1;
       const visibleGroupIds = typeof flowRegistryApi.getVisibleGroupIds === 'function'
         && isRegisteredFlowId(activeFlowId)

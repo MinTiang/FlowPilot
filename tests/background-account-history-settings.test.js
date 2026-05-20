@@ -230,6 +230,7 @@ return {
   assert.equal(api.normalizePersistentSettingValue('phoneSignupReloginAfterBindEmailEnabled', 0), false);
   assert.equal(api.normalizePersistentSettingValue('plusPaymentMethod', 'gopay'), 'gopay');
   assert.equal(api.normalizePersistentSettingValue('plusPaymentMethod', 'gpc-helper'), 'gpc-helper');
+  assert.equal(api.normalizePersistentSettingValue('plusPaymentMethod', 'paypal-hosted'), 'paypal-hosted');
   assert.equal(api.normalizePersistentSettingValue('plusPaymentMethod', 'paypal'), 'paypal');
   assert.equal(api.normalizePersistentSettingValue('plusPaymentMethod', 'unknown'), 'paypal');
   assert.equal(api.normalizePersistentSettingValue('plusAccountAccessStrategy', 'sub2api_codex_session'), 'sub2api_codex_session');

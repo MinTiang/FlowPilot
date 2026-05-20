@@ -128,6 +128,36 @@ const PLUS_PAYPAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = self.MultiPageSte
   signupMethod: 'phone',
   phoneSignupReloginAfterBindEmailEnabled: true,
 }) || PLUS_PAYPAL_PHONE_STEP_DEFINITIONS;
+const PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal-hosted',
+}) || PLUS_PAYPAL_STEP_DEFINITIONS;
+const PLUS_PAYPAL_HOSTED_CHECKOUT_SUB2API_SESSION_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal-hosted',
+  plusAccountAccessStrategy: PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION,
+}) || PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS;
+const PLUS_PAYPAL_HOSTED_CHECKOUT_CPA_SESSION_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal-hosted',
+  plusAccountAccessStrategy: PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION,
+}) || PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS;
+const PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal-hosted',
+  signupMethod: 'phone',
+}) || PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS;
+const PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal-hosted',
+  signupMethod: 'phone',
+  phoneSignupReloginAfterBindEmailEnabled: true,
+}) || PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_STEP_DEFINITIONS;
 const PLUS_GOPAY_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
@@ -214,6 +244,11 @@ const ALL_STEP_DEFINITIONS = (() => {
     ...PLUS_PAYPAL_CPA_SESSION_STEP_DEFINITIONS,
     ...PLUS_PAYPAL_PHONE_STEP_DEFINITIONS,
     ...PLUS_PAYPAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+    ...PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS,
+    ...PLUS_PAYPAL_HOSTED_CHECKOUT_SUB2API_SESSION_STEP_DEFINITIONS,
+    ...PLUS_PAYPAL_HOSTED_CHECKOUT_CPA_SESSION_STEP_DEFINITIONS,
+    ...PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_STEP_DEFINITIONS,
+    ...PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
     ...PLUS_GOPAY_STEP_DEFINITIONS,
     ...PLUS_GOPAY_SUB2API_SESSION_STEP_DEFINITIONS,
     ...PLUS_GOPAY_CPA_SESSION_STEP_DEFINITIONS,
@@ -243,6 +278,10 @@ const PLUS_PAYPAL_STEP_IDS = PLUS_PAYPAL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
   .sort((left, right) => left - right);
+const PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS = PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)
+  .sort((left, right) => left - right);
 const PLUS_GOPAY_STEP_IDS = PLUS_GOPAY_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
@@ -255,6 +294,7 @@ const PLUS_STEP_IDS = PLUS_PAYPAL_STEP_IDS;
 const LAST_STEP_ID = Math.max(
   NORMAL_STEP_IDS[NORMAL_STEP_IDS.length - 1] || 10,
   PLUS_PAYPAL_STEP_IDS[PLUS_PAYPAL_STEP_IDS.length - 1] || 10,
+  PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS[PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS.length - 1] || 10,
   PLUS_GOPAY_STEP_IDS[PLUS_GOPAY_STEP_IDS.length - 1] || 10,
   PLUS_GPC_STEP_IDS[PLUS_GPC_STEP_IDS.length - 1] || 10
 );
@@ -681,9 +721,11 @@ const HERO_SMS_COUNTRY_BY_PHONE_PREFIX = Object.freeze([
 ]);
 const FIVE_SIM_OPERATOR = DEFAULT_FIVE_SIM_OPERATOR;
 const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
+const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
 const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
 const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
-const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
+const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL_HOSTED;
+const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
 const MICROSOFT_TOKEN_DNR_RULE_ID = 1001;
 const PERSISTENT_ALIAS_STATE_KEYS = [
@@ -781,6 +823,12 @@ function isPlusModeState(state = {}) {
 
 function normalizePlusPaymentMethod(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
+  const paypalHostedValue = typeof PLUS_PAYMENT_METHOD_PAYPAL_HOSTED !== 'undefined'
+    ? PLUS_PAYMENT_METHOD_PAYPAL_HOSTED
+    : 'paypal-hosted';
+  if (normalized === paypalHostedValue || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
+    return paypalHostedValue;
+  }
   if (normalized === PLUS_PAYMENT_METHOD_GPC_HELPER) {
     return PLUS_PAYMENT_METHOD_GPC_HELPER;
   }
@@ -937,6 +985,20 @@ function getStepDefinitionsForState(state = {}) {
     }
     return PLUS_GOPAY_STEP_DEFINITIONS;
   }
+  if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+    if (signupMethod === SIGNUP_METHOD_PHONE) {
+      return Boolean(resolvedState?.phoneSignupReloginAfterBindEmailEnabled)
+        ? PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
+        : PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_STEP_DEFINITIONS;
+    }
+    if (plusAccountAccessStrategy === PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION) {
+      return PLUS_PAYPAL_HOSTED_CHECKOUT_SUB2API_SESSION_STEP_DEFINITIONS;
+    }
+    if (plusAccountAccessStrategy === PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION) {
+      return PLUS_PAYPAL_HOSTED_CHECKOUT_CPA_SESSION_STEP_DEFINITIONS;
+    }
+    return PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS;
+  }
   if (
     signupMethod === SIGNUP_METHOD_EMAIL
     && plusAccountAccessStrategy === PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION
@@ -966,6 +1028,9 @@ function getStepIdsForState(state = {}) {
   const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
   if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
     return PLUS_GPC_STEP_IDS;
+  }
+  if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+    return PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS;
   }
   return paymentMethod === PLUS_PAYMENT_METHOD_GOPAY ? PLUS_GOPAY_STEP_IDS : PLUS_PAYPAL_STEP_IDS;
 }
@@ -1151,6 +1216,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusModeEnabled: false,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
   plusAccountAccessStrategy: 'oauth',
+  hostedCheckoutVerificationUrl: '',
+  hostedCheckoutPhoneNumber: '',
+  plusHostedCheckoutOauthDelaySeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS,
   paypalEmail: '',
   paypalPassword: '',
   currentPayPalAccountId: '',
@@ -1325,6 +1393,9 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusModeEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
+  'hostedCheckoutVerificationUrl',
+  'hostedCheckoutPhoneNumber',
+  'plusHostedCheckoutOauthDelaySeconds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -1892,6 +1963,12 @@ function normalizePlusPaymentMethod(value = '') {
     return rootScope.GoPayUtils.normalizePlusPaymentMethod(value);
   }
   const normalized = String(value || '').trim().toLowerCase();
+  const paypalHostedValue = typeof PLUS_PAYMENT_METHOD_PAYPAL_HOSTED !== 'undefined'
+    ? PLUS_PAYMENT_METHOD_PAYPAL_HOSTED
+    : 'paypal-hosted';
+  if (normalized === paypalHostedValue || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
+    return paypalHostedValue;
+  }
   if (normalized === PLUS_PAYMENT_METHOD_GPC_HELPER) {
     return PLUS_PAYMENT_METHOD_GPC_HELPER;
   }
@@ -3084,6 +3161,14 @@ function normalizePersistentSettingValue(key, value) {
       return normalizePlusPaymentMethod(value);
     case 'plusAccountAccessStrategy':
       return normalizePlusAccountAccessStrategy(value);
+    case 'hostedCheckoutVerificationUrl':
+      return String(value || '').trim();
+    case 'hostedCheckoutPhoneNumber':
+      return String(value || '').trim();
+    case 'plusHostedCheckoutOauthDelaySeconds': {
+      const numeric = Number(value);
+      return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS)));
+    }
     case 'paypalEmail':
       return String(value || '').trim();
     case 'paypalPassword':
@@ -13358,6 +13443,7 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   createAutomationTab,
   ensureContentScriptReadyOnTabUntilStopped,
   fetch: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
+  getState,
   markCurrentRegistrationAccountUsed,
   registerTab,
   sendTabMessageUntilStopped,
@@ -13365,6 +13451,7 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   sleepWithStop,
   throwIfStopped,
   waitForTabCompleteUntilStopped,
+  waitForTabUrlMatchUntilStopped,
 });
 const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?.createPlusCheckoutBillingExecutor({
   addLog,

@@ -113,7 +113,7 @@ return {
   assert.deepEqual(api.getStepIds(), [7]);
   assert.deepEqual(api.calls[0], {
     type: 'getSteps',
-    options: { activeFlowId: 'openai', plusModeEnabled: true, plusPaymentMethod: 'gopay', plusAccountAccessStrategy: 'oauth', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false },
+    options: { activeFlowId: 'openai', plusModeEnabled: true, plusPaymentMethod: 'gopay', plusAccountAccessStrategy: 'oauth', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false, accountContributionEnabled: false },
   });
   assert.deepEqual(api.calls[1], { type: 'render', stepIds: [7] });
 });
@@ -186,6 +186,67 @@ return { updatePlusModeUI, selectPlusPaymentMethod, rowPayPalAccount };
   api.selectPlusPaymentMethod.value = 'paypal';
   api.updatePlusModeUI();
   assert.equal(api.rowPayPalAccount.style.display, '');
+});
+
+test('sidepanel Plus UI separates PayPal account mode from PayPal no-card binding mode', () => {
+  const bundle = [
+    extractFunction('normalizePlusPaymentMethod'),
+    extractFunction('normalizePlusAccountAccessStrategy'),
+    extractFunction('getSelectedPlusPaymentMethod'),
+    extractFunction('getRequestedPlusAccountAccessStrategy'),
+    extractFunction('normalizeGpcHelperPhoneModeValue'),
+    extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
+    extractFunction('hasGpcAutoModePermissionField'),
+    extractFunction('isGpcAutoModePermissionDenied'),
+    extractFunction('normalizeGpcOtpChannelValue'),
+    extractFunction('updatePlusModeUI'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = { plusPaymentMethod: 'paypal-hosted' };
+let currentPlusPaymentMethod = 'paypal-hosted';
+let currentPlusAccountAccessStrategy = 'oauth';
+const inputPlusModeEnabled = { checked: true };
+const selectPlusPaymentMethod = { value: 'paypal-hosted', style: { display: 'none' } };
+const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
+const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+const plusPaymentMethodCaption = { textContent: '' };
+const rowPayPalAccount = { style: { display: '' } };
+const rowHostedCheckoutVerificationUrl = { style: { display: 'none' } };
+const rowHostedCheckoutPhone = { style: { display: 'none' } };
+const rowPlusHostedCheckoutOauthDelay = { style: { display: 'none' } };
+${bundle}
+return {
+  updatePlusModeUI,
+  selectPlusPaymentMethod,
+  rowPayPalAccount,
+  plusPaymentMethodCaption,
+  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutPhone, rowPlusHostedCheckoutOauthDelay },
+};
+`)();
+
+  api.updatePlusModeUI();
+
+  assert.equal(api.rowPayPalAccount.style.display, 'none');
+  assert.equal(api.rows.rowHostedCheckoutVerificationUrl.style.display, '');
+  assert.equal(api.rows.rowHostedCheckoutPhone.style.display, '');
+  assert.equal(api.rows.rowPlusHostedCheckoutOauthDelay.style.display, '');
+  assert.match(api.plusPaymentMethodCaption.textContent, /无卡直绑/);
+
+  api.selectPlusPaymentMethod.value = 'paypal';
+  api.updatePlusModeUI();
+
+  assert.equal(api.rowPayPalAccount.style.display, '');
+  assert.equal(api.rows.rowHostedCheckoutVerificationUrl.style.display, 'none');
+  assert.equal(api.rows.rowHostedCheckoutPhone.style.display, 'none');
+  assert.equal(api.rows.rowPlusHostedCheckoutOauthDelay.style.display, 'none');
 });
 
 test('sidepanel Plus UI can hide Plus controls when the shared flow capability registry disables them', () => {
@@ -303,7 +364,7 @@ return {
   assert.deepEqual(api.getStepIds(), [13]);
   assert.deepEqual(api.calls[0], {
     type: 'getSteps',
-    options: { activeFlowId: 'openai', plusModeEnabled: true, plusPaymentMethod: 'gpc-helper', plusAccountAccessStrategy: 'oauth', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false },
+    options: { activeFlowId: 'openai', plusModeEnabled: true, plusPaymentMethod: 'gpc-helper', plusAccountAccessStrategy: 'oauth', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false, accountContributionEnabled: false },
   });
 });
 

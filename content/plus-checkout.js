@@ -34,6 +34,7 @@ const PLUS_CHECKOUT_CONFIGS = {
 };
 const PAYPAL_DIAGNOSTIC_LOG_INTERVAL_MS = 5000;
 const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
+const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
 const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
 const PAYMENT_METHOD_CONFIGS = {
   [PLUS_PAYMENT_METHOD_PAYPAL]: {
@@ -44,6 +45,17 @@ const PAYMENT_METHOD_CONFIGS = {
     billingDetails: {
       country: 'DE',
       currency: 'EUR',
+    },
+    patterns: [/paypal/i],
+  },
+  [PLUS_PAYMENT_METHOD_PAYPAL_HOSTED]: {
+    id: PLUS_PAYMENT_METHOD_PAYPAL_HOSTED,
+    label: 'PayPal 无卡直绑',
+    diagnosticLabel: 'PayPal hosted',
+    checkoutMerchantPath: 'openai_llc',
+    billingDetails: {
+      country: 'US',
+      currency: 'USD',
     },
     patterns: [/paypal/i],
   },
@@ -80,6 +92,7 @@ if (document.documentElement.getAttribute(PLUS_CHECKOUT_LISTENER_SENTINEL) !== '
       || message.type === 'PLUS_CHECKOUT_SELECT_ADDRESS_SUGGESTION'
       || message.type === 'PLUS_CHECKOUT_ENSURE_BILLING_ADDRESS'
       || message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE'
+      || message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP'
       || message.type === 'PLUS_CHECKOUT_GET_STATE'
     ) {
       resetStopState();
@@ -119,6 +132,8 @@ async function handlePlusCheckoutCommand(message) {
       return ensurePlusStructuredBillingAddress(message.payload || {});
     case 'PLUS_CHECKOUT_CLICK_SUBSCRIBE':
       return clickPlusSubscribe(message.payload || {});
+    case 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP':
+      return runPayPalHostedOpenAiCheckoutStep(message.payload || {});
     case 'PLUS_CHECKOUT_GET_STATE':
       return inspectPlusCheckoutState(message.payload || {});
     default:
@@ -150,6 +165,153 @@ async function waitForDocumentComplete() {
     intervalMs: 200,
   });
   await sleep(1000);
+}
+
+function isPayPalHostedOpenAiCheckoutPage() {
+  const host = String(location?.host || '').toLowerCase();
+  return host.includes('pay.openai.com') || host.includes('checkout.stripe.com');
+}
+
+function hideHostedAddressAutocomplete() {
+  [
+    '.AddressAutocomplete-results',
+    '[class*="AddressAutocomplete"]',
+    '#billing-address-autocomplete-results',
+  ].forEach((selector) => {
+    document.querySelectorAll(selector).forEach((node) => {
+      try {
+        node.style.setProperty('display', 'none', 'important');
+        node.style.setProperty('visibility', 'hidden', 'important');
+        node.style.setProperty('pointer-events', 'none', 'important');
+      } catch {
+        // Best effort only; checkout still works without this cleanup.
+      }
+    });
+  });
+}
+
+function hasHostedOpenAiVerificationDialog() {
+  return Boolean(document.getElementById('ci-ciBasic-0'));
+}
+
+function fillHostedInput(selector, value) {
+  const input = document.querySelector(selector);
+  if (!input) {
+    return false;
+  }
+  fillInput(input, String(value || ''));
+  return true;
+}
+
+function selectHostedOptionByText(selector, value) {
+  const select = document.querySelector(selector);
+  const expected = normalizeText(value).toLowerCase();
+  if (!select || !expected) {
+    return false;
+  }
+  const option = Array.from(select.options || []).find((item) => {
+    const optionText = normalizeText(item.textContent || item.label || '').toLowerCase();
+    const optionValue = normalizeText(item.value || '').toLowerCase();
+    return optionText.includes(expected) || optionValue.includes(expected);
+  });
+  if (!option) {
+    return false;
+  }
+  select.value = option.value;
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+function findHostedPayPalButton() {
+  return document.querySelector('[data-testid="paypal-accordion-item-button"]')
+    || document.querySelector('.paypal-accordion-item button')
+    || findClickableByText([/paypal/i]);
+}
+
+function findHostedSubmitButton() {
+  return document.querySelector('button[data-testid="submit-button"]')
+    || document.querySelector('button[data-testid="hosted-payment-submit-button"]')
+    || document.querySelector('button[data-atomic-wait-intent="Submit_Email"]')
+    || document.querySelector('button.SubmitButton--complete')
+    || findClickableByText([
+      /next|continue|pay|subscribe|agree/i,
+      /下一页|继续|支付|订阅|同意/i,
+    ]);
+}
+
+async function clickHostedSubmitButton() {
+  const button = await waitUntil(() => {
+    hideHostedAddressAutocomplete();
+    const candidate = findHostedSubmitButton();
+    return candidate && isEnabledControl(candidate) && isVisibleElement(candidate) ? candidate : null;
+  }, {
+    label: 'hosted checkout 提交按钮',
+    intervalMs: 500,
+    timeoutMs: 15000,
+  });
+  document.activeElement?.blur?.();
+  await sleep(300);
+  simulateClick(button);
+  await sleep(1200);
+  return {
+    clicked: true,
+    buttonText: getActionText(button),
+    hostedVerificationVisible: hasHostedOpenAiVerificationDialog(),
+  };
+}
+
+function fillHostedOpenAiVerificationCode(verificationCode = '') {
+  const code = String(verificationCode || '').replace(/\D+/g, '').slice(0, 6);
+  if (code.length !== 6) {
+    throw new Error('hosted checkout OpenAI 验证码无效。');
+  }
+  for (let index = 0; index < 6; index += 1) {
+    const input = document.getElementById(`ci-ciBasic-${index}`);
+    if (!input) {
+      throw new Error('hosted checkout OpenAI 页面未找到完整的验证码输入框。');
+    }
+    fillInput(input, code[index]);
+  }
+  return {
+    verificationCodeFilled: true,
+    hostedVerificationVisible: true,
+  };
+}
+
+async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
+  await waitForDocumentComplete();
+  if (!isPayPalHostedOpenAiCheckoutPage()) {
+    throw new Error('当前页面不是 PayPal 无卡直绑的 OpenAI hosted checkout 页面。');
+  }
+  if (payload.verificationCode) {
+    return fillHostedOpenAiVerificationCode(payload.verificationCode);
+  }
+
+  hideHostedAddressAutocomplete();
+  const payPalButton = findHostedPayPalButton();
+  if (payPalButton) {
+    simulateClick(payPalButton);
+    await sleep(500);
+  }
+
+  const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
+  fillHostedInput('#billingAddressLine1', address.street || address.address1 || '');
+  fillHostedInput('#billingLocality', address.city || '');
+  fillHostedInput('#billingPostalCode', address.zip || address.postalCode || '');
+  selectHostedOptionByText('#billingAdministrativeArea', address.state || address.region || '');
+
+  const consent = document.getElementById('termsOfServiceConsentCheckbox');
+  if (consent && !consent.checked) {
+    simulateClick(consent);
+  }
+
+  for (let count = 0; count < 5; count += 1) {
+    hideHostedAddressAutocomplete();
+    await sleep(250);
+  }
+
+  return clickHostedSubmitButton();
 }
 
 function isVisibleElement(el) {
@@ -423,7 +585,14 @@ function findPaymentCardAncestor(el, pattern) {
 }
 
 function normalizePlusPaymentMethod(value = '') {
-  return String(value || '').trim().toLowerCase() === PLUS_PAYMENT_METHOD_GOPAY
+  const normalized = String(value || '').trim().toLowerCase();
+  const paypalHostedValue = typeof PLUS_PAYMENT_METHOD_PAYPAL_HOSTED !== 'undefined'
+    ? PLUS_PAYMENT_METHOD_PAYPAL_HOSTED
+    : 'paypal-hosted';
+  if (normalized === paypalHostedValue || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
+    return paypalHostedValue;
+  }
+  return normalized === PLUS_PAYMENT_METHOD_GOPAY
     ? PLUS_PAYMENT_METHOD_GOPAY
     : PLUS_PAYMENT_METHOD_PAYPAL;
 }
@@ -620,6 +789,7 @@ function buildPlusCheckoutPayload(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
   const config = getPaymentMethodConfig(paymentMethod);
   return {
     ...JSON.parse(JSON.stringify(PLUS_CHECKOUT_PAYLOAD_BASE)),
+    checkout_ui_mode: config.id === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED ? 'hosted' : 'custom',
     billing_details: {
       ...config.billingDetails,
     },
@@ -633,6 +803,29 @@ function buildPlusCheckoutUrl(checkoutSessionId, paymentMethod = PLUS_PAYMENT_ME
   }
   const config = getPaymentMethodConfig(paymentMethod);
   return `https://chatgpt.com/checkout/${config.checkoutMerchantPath}/${sessionId}`;
+}
+
+function findHostedCheckoutUrl(payload = {}) {
+  const queue = [payload];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object') {
+      continue;
+    }
+    if (Array.isArray(current)) {
+      queue.push(...current);
+      continue;
+    }
+    for (const value of Object.values(current)) {
+      if (typeof value === 'string' && /^https:\/\/(?:pay\.openai\.com|checkout\.stripe\.com)\/c\/pay\//i.test(value.trim())) {
+        return value.trim();
+      }
+      if (value && typeof value === 'object') {
+        queue.push(value);
+      }
+    }
+  }
+  return '';
 }
 
 async function createPlusCheckoutSession(options = {}) {
@@ -667,8 +860,16 @@ async function createPlusCheckoutSession(options = {}) {
     throw new Error(`创建 Plus Checkout 失败：${detail}`);
   }
 
+  const checkoutUrl = buildPlusCheckoutUrl(data.checkout_session_id, paymentMethod);
+  const hostedCheckoutUrl = findHostedCheckoutUrl(data);
+  const preferredCheckoutUrl = paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED
+    ? (hostedCheckoutUrl || checkoutUrl)
+    : checkoutUrl;
+
   return {
-    checkoutUrl: buildPlusCheckoutUrl(data.checkout_session_id, paymentMethod),
+    checkoutUrl,
+    hostedCheckoutUrl,
+    preferredCheckoutUrl,
     country: checkoutPayload.billing_details.country,
     currency: checkoutPayload.billing_details.currency,
   };
@@ -1550,6 +1751,9 @@ async function inspectPlusCheckoutState(options = {}) {
     cardFieldsVisible: hasCreditCardFields(),
     billingFieldsVisible: hasBillingAddressFields(),
     hasSubscribeButton: Boolean(findSubscribeButton()),
+    hostedOpenAiPage: isPayPalHostedOpenAiCheckoutPage(),
+    hostedVerificationVisible: hasHostedOpenAiVerificationDialog(),
+    hostedPayPalButtonFound: Boolean(findHostedPayPalButton()),
     checkoutAmountSummary: getCheckoutAmountSummary(),
     addressFieldValues: {
       address1: structuredAddress.address1?.value || '',

@@ -115,19 +115,21 @@ return {
 `)();
 }
 
-test('sidepanel keeps requested Plus account strategy while OAuth-only targets force the effective value', () => {
+test('sidepanel keeps requested Plus account strategy while contribution mode forces SUB2API', () => {
   const api = buildHarness(
     `{
       canShowPlusSettings: true,
-      runtimeLocks: { plusModeEnabled: true },
+      runtimeLocks: { plusModeEnabled: true, accountContribution: true },
       canEditPlusAccountAccessStrategy: false,
-      effectivePlusAccountAccessStrategy: 'oauth',
+      availablePlusAccountAccessStrategies: ['sub2api_codex_session'],
+      effectivePlusAccountAccessStrategy: 'sub2api_codex_session',
     }`,
     `{
       activeFlowId: 'openai',
       panelMode: 'cpa',
       plusPaymentMethod: 'paypal',
-      plusAccountAccessStrategy: 'sub2api_codex_session',
+      accountContributionEnabled: true,
+      plusAccountAccessStrategy: 'cpa_codex_session',
     }`
   );
 
@@ -135,10 +137,10 @@ test('sidepanel keeps requested Plus account strategy while OAuth-only targets f
 
   assert.equal(api.rowPlusAccountAccessStrategy.style.display, '');
   assert.equal(api.selectPlusAccountAccessStrategy.disabled, true);
-  assert.equal(api.selectPlusAccountAccessStrategy.dataset.requestedValue, 'sub2api_codex_session');
-  assert.equal(api.selectPlusAccountAccessStrategy.value, 'oauth');
-  assert.equal(api.getRequestedPlusAccountAccessStrategy(), 'sub2api_codex_session');
-  assert.match(api.plusAccountAccessStrategyCaption.textContent, /OAuth/);
+  assert.equal(api.selectPlusAccountAccessStrategy.dataset.requestedValue, 'cpa_codex_session');
+  assert.equal(api.selectPlusAccountAccessStrategy.value, 'sub2api_codex_session');
+  assert.equal(api.getRequestedPlusAccountAccessStrategy(), 'cpa_codex_session');
+  assert.match(api.plusAccountAccessStrategyCaption.textContent, /SUB2API/);
 });
 
 test('sidepanel enables SUB2API session strategy selection when the current Plus target supports it', () => {
@@ -283,6 +285,7 @@ return {
         plusAccountAccessStrategy: 'sub2api_codex_session',
         signupMethod: 'email',
         phoneSignupReloginAfterBindEmailEnabled: false,
+        accountContributionEnabled: false,
       },
     },
     {
@@ -294,6 +297,7 @@ return {
         plusAccountAccessStrategy: 'sub2api_codex_session',
         signupMethod: 'email',
         phoneSignupReloginAfterBindEmailEnabled: false,
+        accountContributionEnabled: false,
       },
     },
   ]);
