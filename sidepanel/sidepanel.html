@@ -1558,8 +1558,12 @@
             </div>
             <div class="data-row" id="row-madao-routing-plan-id" style="display:none;">
               <span class="data-label">路由计划</span>
-              <input type="text" id="input-madao-routing-plan-id" class="data-input mono"
-                placeholder="routing_plan_id" />
+              <div class="data-inline data-value-actions">
+                <select id="select-madao-routing-plan-id" class="data-select mono">
+                  <option value="">请先刷新路由计划</option>
+                </select>
+                <button id="btn-madao-refresh-routing-plans" class="btn btn-ghost btn-xs data-inline-btn" type="button">刷新</button>
+              </div>
             </div>
             <div class="data-row" id="row-madao-price-range" style="display:none;">
               <span class="data-label">MaDao 价格</span>

@@ -156,7 +156,9 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /id="row-madao-mode"/);
   assert.match(html, /id="select-madao-mode"/);
   assert.match(html, /id="row-madao-routing-plan-id"/);
-  assert.match(html, /id="input-madao-routing-plan-id"/);
+  assert.match(html, /id="select-madao-routing-plan-id"/);
+  assert.match(html, /id="btn-madao-refresh-routing-plans"/);
+  assert.doesNotMatch(html, /id="input-madao-routing-plan-id"/);
   assert.doesNotMatch(html, /id="row-madao-provider-id"/);
   assert.doesNotMatch(html, /id="input-madao-provider-id"/);
   assert.doesNotMatch(html, /id="row-madao-country"/);
@@ -192,6 +194,85 @@ test('sidepanel loads live SMS country lists silently during startup', () => {
   assert.doesNotMatch(sidepanelSource, /loadHeroSmsCountries\(\{ silent: true, preferFallbackOnly: true \}\)/);
   assert.doesNotMatch(sidepanelSource, /loadFiveSimCountries\(\{ silent: true, preferFallbackOnly: true \}\)/);
   assert.doesNotMatch(sidepanelSource, /console\.error\('加载 (?:HeroSMS|5sim|NexSMS) 国家列表失败：'/);
+});
+
+test('MaDao routing plan select loads options from helper API and preserves saved plan', async () => {
+  const requests = [];
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      async text() {
+        return JSON.stringify({
+          plans: [
+            { id: 'openai-plan', name: 'OpenAI Plan', service: 'openai', enabled: true },
+            { id: 'kiro-plan', name: 'Kiro Plan', service: 'kiro', enabled: true },
+            { id: 'disabled-plan', name: 'Disabled Plan', service: 'openai', enabled: false },
+          ],
+        });
+      },
+    };
+  };
+
+  const api = new Function('fetch', `
+const DEFAULT_MADAO_BASE_URL = 'http://127.0.0.1:7822';
+let latestState = {
+  madaoBaseUrl: 'http://madao.local/api/acquire',
+  madaoHttpSecret: 'madao-secret',
+  madaoRoutingPlanId: 'stored-plan',
+};
+let maDaoRoutingPlanOptions = [];
+let displayText = '';
+let toastText = '';
+const inputMaDaoBaseUrl = { value: 'http://madao.local/api/acquire' };
+const inputMaDaoHttpSecret = { value: 'madao-secret' };
+const selectMaDaoRoutingPlanId = {
+  value: 'stored-plan',
+  options: [],
+  replaceChildren(...children) {
+    this.options = children;
+  },
+};
+function updateHeroSmsPlatformDisplay() {
+  displayText = getSelectedMaDaoRoutingPlanLabel();
+}
+function showToast(message) {
+  toastText = message;
+}
+${extractFunction('normalizeMaDaoBaseUrlValue')}
+${extractFunction('normalizeMaDaoIdentifierValue')}
+${extractFunction('normalizeMaDaoRoutingPlanIdValue')}
+${extractFunction('createSelectOptionElement')}
+${extractFunction('setSelectOptions')}
+${extractFunction('buildMaDaoRoutingPlanOptions')}
+${extractFunction('setMaDaoRoutingPlanSelectOptions')}
+${extractFunction('buildMaDaoRequestUrl')}
+${extractFunction('buildMaDaoRequestHeaders')}
+${extractFunction('fetchMaDaoJson')}
+${extractFunction('getMaDaoRoutingPlansFromPayload')}
+${extractFunction('loadMaDaoRoutingPlans')}
+${extractFunction('getSelectedMaDaoRoutingPlanLabel')}
+return {
+  loadMaDaoRoutingPlans,
+  selectMaDaoRoutingPlanId,
+  get options() { return selectMaDaoRoutingPlanId.options.map((option) => ({ value: option.value, label: option.textContent, selected: option.selected })); },
+  get displayText() { return displayText; },
+  get toastText() { return toastText; },
+};
+`)(fetchImpl);
+
+  const plans = await api.loadMaDaoRoutingPlans();
+
+  assert.deepStrictEqual(plans.map((plan) => plan.value), ['openai-plan']);
+  assert.equal(api.selectMaDaoRoutingPlanId.value, 'stored-plan');
+  assert.deepStrictEqual(api.options.map((option) => option.value), ['', 'stored-plan', 'openai-plan']);
+  assert.equal(api.options.find((option) => option.value === 'stored-plan').selected, true);
+  assert.equal(api.displayText, 'stored-plan');
+  assert.equal(api.toastText, '已刷新 MaDao 路由计划。');
+  assert.equal(requests[0].url, 'http://madao.local/api/routing-plans');
+  assert.equal(requests[0].options.headers.Authorization, 'Bearer madao-secret');
 });
 
 test('HeroSMS country parser accepts keyed country maps from the live API', () => {
@@ -1160,7 +1241,7 @@ const inputNexSmsServiceCode = { value: 'ot' };
 const inputMaDaoBaseUrl = { value: 'http://127.0.0.1:7822/api/acquire' };
 const inputMaDaoHttpSecret = { value: 'madao-secret' };
 const selectMaDaoMode = { value: 'direct' };
-const inputMaDaoRoutingPlanId = { value: 'plan-1' };
+const selectMaDaoRoutingPlanId = { value: 'plan-1' };
 const inputMaDaoProviderId = { value: 'Local Provider!!' };
 const inputMaDaoCountry = { value: 'th' };
 const inputMaDaoAutoPickCountry = { checked: false };
@@ -1434,7 +1515,13 @@ const inputNexSmsServiceCode = { value: 'ot' };
 const inputMaDaoBaseUrl = { value: 'http://127.0.0.1:7822/api/poll' };
 const inputMaDaoHttpSecret = { value: 'madao-live-secret' };
 const selectMaDaoMode = { value: 'direct' };
-const inputMaDaoRoutingPlanId = { value: 'plan-live' };
+const selectMaDaoRoutingPlanId = {
+  value: 'plan-live',
+  options: [],
+  replaceChildren(...children) {
+    this.options = children;
+  },
+};
 const inputMaDaoProviderId = { value: 'Provider Live!' };
 const inputMaDaoCountry = { value: 'local' };
 const inputMaDaoAutoPickCountry = { checked: false };
@@ -1454,6 +1541,7 @@ let heroSmsCountrySelectionOrder = [];
 let phoneSmsProviderOrderSelection = ['hero-sms', '5sim'];
 let lastPhoneSmsProviderBeforeChange = null;
 let savedPayload = null;
+let maDaoRoutingPlanOptions = [];
 
 ${extractFunction('normalizePhoneSmsProvider')}
 ${extractFunction('normalizePhoneSmsProviderValue')}
@@ -1483,9 +1571,14 @@ ${extractFunction('normalizeNexSmsServiceCodeValue')}
 ${extractFunction('normalizeMaDaoBaseUrlValue')}
 ${extractFunction('normalizeMaDaoModeValue')}
 ${extractFunction('normalizeMaDaoIdentifierValue')}
+${extractFunction('normalizeMaDaoRoutingPlanIdValue')}
 ${extractFunction('normalizeMaDaoProviderIdValue')}
 ${extractFunction('normalizeMaDaoCountry')}
 ${extractFunction('normalizeMaDaoPriceValue')}
+${extractFunction('createSelectOptionElement')}
+${extractFunction('setSelectOptions')}
+${extractFunction('buildMaDaoRoutingPlanOptions')}
+${extractFunction('setMaDaoRoutingPlanSelectOptions')}
 ${extractFunction('normalizePhoneSmsMinPriceValue')}
 ${extractFunction('normalizePhoneSmsMaxPriceValue')}
 ${extractFunction('normalizeHeroSmsCountryId')}
