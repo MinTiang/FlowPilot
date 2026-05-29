@@ -150,6 +150,10 @@
     return String(value || '').trim() || fallback;
   }
 
+  function normalizeCountryKey(value) {
+    return normalizeFiveSimCountryId(value, '');
+  }
+
   function formatFiveSimCountryLabel(id = '', englishValue = '', fallback = DEFAULT_COUNTRY_LABEL) {
     const countryId = normalizeFiveSimCountryId(id, '');
     const english = normalizeFiveSimCountryLabel(englishValue || countryId || fallback, fallback);
@@ -179,6 +183,42 @@
       return '';
     }
     return String(Math.round(numeric * 10000) / 10000);
+  }
+
+  function normalizePriceLimit(value = '') {
+    const normalized = normalizeFiveSimMaxPrice(value);
+    if (!normalized) {
+      return null;
+    }
+    const numeric = Number(normalized);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+  }
+
+  function resolvePriceRange(state = {}) {
+    const minPriceLimit = normalizePriceLimit(state?.fiveSimMinPrice);
+    const maxPriceLimit = normalizePriceLimit(state?.fiveSimMaxPrice);
+    return {
+      minPriceLimit,
+      maxPriceLimit,
+      hasMinPriceLimit: minPriceLimit !== null,
+      hasMaxPriceLimit: maxPriceLimit !== null,
+      invalidRange: minPriceLimit !== null && maxPriceLimit !== null && minPriceLimit > maxPriceLimit,
+    };
+  }
+
+  function formatPriceRangeText(minPriceLimit = null, maxPriceLimit = null) {
+    const minPrice = normalizePriceLimit(minPriceLimit);
+    const maxPrice = normalizePriceLimit(maxPriceLimit);
+    if (minPrice !== null && maxPrice !== null) {
+      return `${minPrice}~${maxPrice}`;
+    }
+    if (minPrice !== null) {
+      return `${minPrice}~`;
+    }
+    if (maxPrice !== null) {
+      return `~${maxPrice}`;
+    }
+    return 'unbounded';
   }
 
   function normalizeFiveSimCountryFallback(value = []) {
@@ -405,6 +445,13 @@
     return candidates;
   }
 
+  function resolveCountryLabel(state = {}, countryId = DEFAULT_COUNTRY_ID) {
+    const countryKey = normalizeCountryKey(countryId);
+    const matched = resolveCountryCandidates(state)
+      .find((entry) => normalizeCountryKey(entry.id) === countryKey);
+    return matched?.label || formatFiveSimCountryLabel(countryKey, countryKey, countryKey || DEFAULT_COUNTRY_LABEL);
+  }
+
   async function fetchBalance(state = {}, deps = {}) {
     const config = resolveConfig(state, deps);
     const payload = await fetchJson(config, '/v1/user/profile', {
@@ -590,6 +637,40 @@
         ? { ignoredPhoneCodeKeys: normalizeStringList(record.ignoredPhoneCodeKeys || fallback.ignoredPhoneCodeKeys) }
         : {}),
     };
+  }
+
+  function resolveActivationCountry(activation = {}, state = {}) {
+    const normalizedActivation = normalizeActivation(activation)
+      || (activation && typeof activation === 'object' ? activation : {});
+    const countryId = normalizeFiveSimCountryId(
+      normalizedActivation.countryCode ?? normalizedActivation.countryId ?? normalizedActivation.country,
+      DEFAULT_COUNTRY_ID
+    );
+    const matched = resolveCountryCandidates(state)
+      .find((entry) => normalizeCountryKey(entry.id) === countryId);
+    if (matched) {
+      return matched;
+    }
+    return {
+      id: countryId,
+      code: countryId,
+      label: normalizeFiveSimCountryLabel(
+        normalizedActivation.countryLabel,
+        formatFiveSimCountryLabel(countryId, countryId, countryId)
+      ),
+    };
+  }
+
+  function getActivationCountryKey(activation = {}) {
+    return normalizeCountryKey(activation?.countryCode ?? activation?.countryId ?? activation?.country);
+  }
+
+  function getActivationPrice(activation = {}) {
+    return normalizePrice(
+      activation?.selectedPrice
+      ?? activation?.price
+      ?? activation?.maxPrice
+    );
   }
 
   function isNoNumbersPayload(payloadOrMessage) {
@@ -806,6 +887,22 @@
     };
   }
 
+  async function prepareActivationForReuse(state = {}, activation, _options = {}, deps = {}) {
+    try {
+      const retainedActivation = await reuseActivation(state, activation, deps);
+      return {
+        ok: true,
+        activation: retainedActivation,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: 'reuse_check_failed',
+        message: error.message || '5sim 复用手机号基线检查失败。',
+      };
+    }
+  }
+
   async function finishActivation(state = {}, activation, deps = {}) {
     const normalizedActivation = normalizeActivation(activation);
     if (!normalizedActivation) return '';
@@ -834,6 +931,25 @@
       actionLabel: '5sim 拉黑号码',
     });
     return describePayload(payload);
+  }
+
+  async function requestAdditionalSms() {
+    return '';
+  }
+
+  async function rotateActivation(state = {}, activation, options = {}, deps = {}) {
+    const releaseAction = String(options?.releaseAction || '').trim().toLowerCase() === 'ban'
+      ? 'ban'
+      : 'cancel';
+    if (releaseAction === 'ban') {
+      await banActivation(state, activation, deps);
+    } else {
+      await cancelActivation(state, activation, deps);
+    }
+    return {
+      currentTicketId: String(activation?.activationId || activation?.id || ''),
+      nextActivation: null,
+    };
   }
 
   function extractVerificationCode(rawCodeOrText) {
@@ -942,9 +1058,18 @@
       addLog: deps.addLog,
       requestTimeoutMs: deps.requestTimeoutMs || DEFAULT_REQUEST_TIMEOUT_MS,
     };
+    const capabilities = Object.freeze({
+      supportsReusableActivation: true,
+      supportsAutomaticFreeReuse: true,
+      supportsFreeReusePreservation: true,
+      supportsPageResend: false,
+      supportsPageResendProbe: true,
+      requiresCountrySelection: true,
+    });
     return {
       id: PROVIDER_ID,
       label: '5sim',
+      capabilities,
       defaultCountryId: DEFAULT_COUNTRY_ID,
       defaultCountryLabel: DEFAULT_COUNTRY_LABEL,
       supportedCountries: SUPPORTED_COUNTRY_ITEMS,
@@ -954,18 +1079,38 @@
       normalizeCountryLabel: normalizeFiveSimCountryLabel,
       formatCountryLabel: formatFiveSimCountryLabel,
       normalizeCountryFallback: normalizeFiveSimCountryFallback,
+      normalizeCountryKey,
       normalizeMaxPrice: normalizeFiveSimMaxPrice,
       normalizeOperator: normalizeFiveSimOperator,
+      normalizeActivation,
       resolveCountryCandidates,
+      resolveCountryLabel,
+      resolveActivationCountry,
+      getActivationCountryKey,
+      getActivationPrice,
       requestActivation: (state, options) => requestActivation(state, options, providerDeps),
       reuseActivation: (state, activation) => reuseActivation(state, activation, providerDeps),
       finishActivation: (state, activation) => finishActivation(state, activation, providerDeps),
       cancelActivation: (state, activation) => cancelActivation(state, activation, providerDeps),
       banActivation: (state, activation) => banActivation(state, activation, providerDeps),
+      requestAdditionalSms: (state, activation) => requestAdditionalSms(state, activation, providerDeps),
+      rotateActivation: (state, activation, options) => rotateActivation(state, activation, options, providerDeps),
       pollActivationCode: (state, activation, options) => pollActivationCode(state, activation, options, providerDeps),
+      prepareActivationForReuse: (state, activation, options) => prepareActivationForReuse(state, activation, options, providerDeps),
+      canPersistReusableActivation: () => true,
+      canPreserveActivationForFreeReuse: (_state, activation) => Boolean(
+        normalizeActivation(activation)
+        && activation
+        && typeof activation === 'object'
+        && activation.phoneCodeReceived
+      ),
+      shouldUsePageResend: () => false,
+      shouldProbePageResend: () => true,
       fetchBalance: (state) => fetchBalance(state, providerDeps),
       fetchCountries: (state) => fetchCountries(state, providerDeps),
       fetchPrices: (state, countryConfig) => fetchPrices(state, countryConfig, providerDeps),
+      resolvePriceRange,
+      formatPriceRangeText,
       collectPriceEntries,
       describePayload,
     };
@@ -983,8 +1128,13 @@
     normalizeFiveSimCountryFallback,
     normalizeFiveSimCountryId,
     normalizeFiveSimCountryLabel,
+    normalizeCountryKey,
     formatFiveSimCountryLabel,
     normalizeFiveSimMaxPrice,
     normalizeFiveSimOperator,
+    resolvePriceRange,
+    formatPriceRangeText,
+    normalizeActivation,
+    resolveActivationCountry,
   };
 });

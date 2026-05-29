@@ -7,6 +7,19 @@
   const DEFAULT_SERVICE = 'openai';
   const DEFAULT_MODE = 'routing_plan';
   const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+  const DEFAULT_POLL_TIMEOUT_MS = 180000;
+  const DEFAULT_POLL_INTERVAL_MS = 5000;
+  const PHONE_CODE_TIMEOUT_ERROR_PREFIX = 'PHONE_CODE_TIMEOUT::';
+  const COUNTRY_BY_PHONE_PREFIX = Object.freeze([
+    { prefix: '84', id: 'VN', label: 'Vietnam' },
+    { prefix: '66', id: 'TH', label: 'Thailand' },
+    { prefix: '62', id: 'ID', label: 'Indonesia' },
+    { prefix: '44', id: 'GB', label: 'United Kingdom' },
+    { prefix: '81', id: 'JP', label: 'Japan' },
+    { prefix: '49', id: 'DE', label: 'Germany' },
+    { prefix: '33', id: 'FR', label: 'France' },
+    { prefix: '1', id: 'US', label: 'USA' },
+  ]);
 
   function normalizeText(value = '', fallback = '') {
     return String(value || '').trim() || fallback;
@@ -42,6 +55,52 @@
       return trimmed.toUpperCase();
     }
     return lowered.replace(/[^a-z0-9_-]+/g, '');
+  }
+
+  function normalizeCountryKey(value) {
+    return normalizeCountry(value);
+  }
+
+  function getRegionDisplayName(regionCode, locale = 'en') {
+    const normalizedRegionCode = normalizeCountry(regionCode);
+    const normalizedLocale = normalizeText(locale);
+    if (!/^[A-Z]{2}$/.test(normalizedRegionCode) || !normalizedLocale || typeof Intl?.DisplayNames !== 'function') {
+      return '';
+    }
+    try {
+      return String(
+        new Intl.DisplayNames([normalizedLocale], { type: 'region' }).of(normalizedRegionCode) || ''
+      ).trim();
+    } catch {
+      return '';
+    }
+  }
+
+  function normalizeCountryLabel(value = '', countryCode = '') {
+    const label = normalizeText(value);
+    if (label) {
+      return label;
+    }
+    const normalizedCountryCode = normalizeCountry(countryCode);
+    if (!normalizedCountryCode) {
+      return '';
+    }
+    return getRegionDisplayName(normalizedCountryCode, 'en') || normalizedCountryCode;
+  }
+
+  function inferCountryFromPhoneNumber(phoneNumber = '') {
+    const digits = String(phoneNumber || '').replace(/\D+/g, '');
+    if (!digits) {
+      return null;
+    }
+    const match = COUNTRY_BY_PHONE_PREFIX.find((entry) => digits.startsWith(entry.prefix));
+    if (!match) {
+      return null;
+    }
+    return {
+      id: normalizeCountry(match.id),
+      label: normalizeCountryLabel(match.label, match.id),
+    };
   }
 
   function normalizeBoolean(value, fallback = false) {
@@ -245,6 +304,68 @@
     };
   }
 
+  function normalizeActivation(record = {}, fallback = {}) {
+    const direct = normalizeActivationFromAcquire(record, fallback);
+    if (direct) {
+      return direct;
+    }
+    const source = record && typeof record === 'object' && !Array.isArray(record) ? record : {};
+    const ticketId = normalizeText(source.activationId || source.ticketId || source.id || fallback.activationId);
+    const phoneNumber = normalizeText(source.phoneNumber || source.phone || fallback.phoneNumber);
+    if (!ticketId || !phoneNumber) {
+      return null;
+    }
+    const inferredCountry = inferCountryFromPhoneNumber(phoneNumber);
+    const countryId = normalizeCountry(source.countryId ?? source.country ?? fallback.countryId ?? inferredCountry?.id);
+    const price = normalizePrice(source.madaoPrice ?? source.price ?? fallback.madaoPrice ?? fallback.price);
+    return {
+      activationId: ticketId,
+      phoneNumber,
+      provider: PROVIDER_ID,
+      serviceCode: normalizeText(source.serviceCode || source.service || fallback.serviceCode, DEFAULT_SERVICE),
+      countryId,
+      countryLabel: normalizeCountryLabel(source.countryLabel || source.country_label || fallback.countryLabel, countryId),
+      maxUses: Math.max(1, Math.floor(Number(source.maxUses ?? fallback.maxUses) || 1)),
+      successfulUses: Math.max(0, Math.floor(Number(source.successfulUses ?? fallback.successfulUses) || 0)),
+      ...(source.source ? { source: normalizeText(source.source) } : {}),
+      ...(source.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+      ...(source.phoneCodeReceivedAt ? { phoneCodeReceivedAt: Math.max(0, Number(source.phoneCodeReceivedAt) || 0) } : {}),
+      ...(source.madaoProviderId ? { madaoProviderId: normalizeProviderId(source.madaoProviderId) } : {}),
+      ...(source.madaoRoutingPlanId ? { madaoRoutingPlanId: normalizeText(source.madaoRoutingPlanId) } : {}),
+      ...(source.madaoRoutingPlanName ? { madaoRoutingPlanName: normalizeText(source.madaoRoutingPlanName) } : {}),
+      ...(source.madaoRoutingItemId ? { madaoRoutingItemId: normalizeText(source.madaoRoutingItemId) } : {}),
+      ...(source.madaoAcquirePath ? { madaoAcquirePath: mapAcquirePath(source.madaoAcquirePath) } : {}),
+      ...(source.madaoStatus ? { madaoStatus: mapTicketStatus(source.madaoStatus) } : {}),
+      ...(price !== null ? { madaoPrice: price } : {}),
+    };
+  }
+
+  function resolveCountryLabel(_state = {}, countryId = '') {
+    return normalizeCountryLabel('', countryId);
+  }
+
+  function resolveActivationCountry(activation = {}) {
+    const normalizedActivation = normalizeActivation(activation)
+      || (activation && typeof activation === 'object' ? activation : {});
+    const inferredCountry = inferCountryFromPhoneNumber(normalizedActivation.phoneNumber);
+    const countryId = normalizeCountry(normalizedActivation.countryId ?? normalizedActivation.country ?? inferredCountry?.id);
+    return {
+      id: countryId,
+      label: normalizeCountryLabel(normalizedActivation.countryLabel || inferredCountry?.label, countryId),
+    };
+  }
+
+  function getActivationCountryKey(activation = {}) {
+    const normalizedActivation = normalizeActivation(activation)
+      || (activation && typeof activation === 'object' ? activation : {});
+    const inferredCountry = inferCountryFromPhoneNumber(normalizedActivation.phoneNumber);
+    return normalizeCountryKey(normalizedActivation.countryId ?? normalizedActivation.country ?? inferredCountry?.id);
+  }
+
+  function getActivationPrice(activation = {}) {
+    return normalizePrice(activation?.madaoPrice ?? activation?.selectedPrice ?? activation?.price ?? activation?.maxPrice);
+  }
+
   function extractVerificationCode(value = '') {
     const text = String(value || '').trim();
     if (!text) {
@@ -315,18 +436,75 @@
   }
 
   async function pollActivationCode(state = {}, activation, options = {}, deps = {}) {
-    const payload = await pollActivation(state, activation, deps);
-    const code = extractCodeFromPollPayload(payload);
-    if (code) {
-      return code;
+    const configuredTimeoutMs = Number(options.timeoutMs);
+    const timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+      ? Math.max(1000, configuredTimeoutMs)
+      : 0;
+    if (!timeoutMs) {
+      const payload = await pollActivation(state, activation, deps);
+      const code = extractCodeFromPollPayload(payload);
+      if (code) {
+        return code;
+      }
+      if (typeof options.onStatus === 'function') {
+        await options.onStatus({
+          activation,
+          statusText: describePayload(payload) || 'PENDING',
+        });
+      }
+      return '';
     }
-    if (typeof options.onStatus === 'function') {
-      await options.onStatus({
-        activation,
-        statusText: describePayload(payload) || 'PENDING',
-      });
+
+    const intervalMs = Math.max(1000, Number(options.intervalMs) || DEFAULT_POLL_INTERVAL_MS);
+    const maxRoundsRaw = Math.floor(Number(options.maxRounds));
+    const maxRounds = Number.isFinite(maxRoundsRaw) && maxRoundsRaw > 0 ? maxRoundsRaw : 0;
+    const start = Date.now();
+    let pollCount = 0;
+    let lastResponse = '';
+    while (Date.now() - start < timeoutMs) {
+      if (maxRounds > 0 && pollCount >= maxRounds) {
+        break;
+      }
+      deps.throwIfStopped?.();
+      const payload = await pollActivation(state, activation, deps);
+      const code = extractCodeFromPollPayload(payload);
+      const statusText = normalizeText(
+        payload?.status
+        || payload?.madaoStatus
+        || payload?.message
+        || payload?.text
+        || describePayload(payload),
+        'PENDING'
+      );
+      lastResponse = statusText;
+      pollCount += 1;
+      if (typeof options.onStatus === 'function') {
+        await options.onStatus({
+          activation,
+          elapsedMs: Date.now() - start,
+          pollCount,
+          statusText,
+          timeoutMs,
+        });
+      }
+      if (code) {
+        return code;
+      }
+      if (/^(cancelled|canceled|failed|expired|timeout)$/i.test(statusText)) {
+        throw new Error(`MaDao 订单在收到短信前已结束：${statusText}`);
+      }
+      if (typeof options.onWaitingForCode === 'function') {
+        await options.onWaitingForCode({
+          activation,
+          elapsedMs: Date.now() - start,
+          pollCount,
+          statusText,
+          timeoutMs,
+        });
+      }
+      await deps.sleepWithStop?.(intervalMs);
     }
-    return '';
+    throw new Error(`${PHONE_CODE_TIMEOUT_ERROR_PREFIX}等待手机验证码超时。${lastResponse ? ` MaDao 最后状态：${lastResponse}` : ''}`);
   }
 
   async function releaseActivation(state = {}, activation, action = 'cancel', deps = {}) {
@@ -398,15 +576,62 @@
     };
   }
 
+  async function finishActivation(state = {}, activation, deps = {}) {
+    return releaseActivation(state, activation, 'finish', deps);
+  }
+
+  async function cancelActivation(state = {}, activation, deps = {}) {
+    return releaseActivation(state, activation, 'cancel', deps);
+  }
+
+  async function banActivation(state = {}, activation, deps = {}) {
+    return releaseActivation(state, activation, 'ban', deps);
+  }
+
+  async function reuseActivation(_state = {}, activation) {
+    return activation && typeof activation === 'object' ? { ...activation } : activation;
+  }
+
+  async function requestAdditionalSms() {
+    return '';
+  }
+
+  function resolveCountryCandidates() {
+    return [];
+  }
+
   function createProvider(deps = {}) {
+    const capabilities = Object.freeze({
+      supportsReusableActivation: false,
+      supportsAutomaticFreeReuse: false,
+      supportsFreeReusePreservation: false,
+      supportsPageResend: false,
+      supportsPageResendProbe: false,
+      supportsRouteReplace: true,
+      requiresCountrySelection: false,
+    });
     return {
       id: PROVIDER_ID,
       label: 'MaDao',
+      capabilities,
       defaultProduct: DEFAULT_SERVICE,
+      normalizeCountryId: normalizeCountry,
+      normalizeCountryLabel,
+      normalizeCountryKey,
+      normalizeActivation,
+      resolveCountryLabel,
+      resolveActivationCountry,
+      getActivationCountryKey,
+      getActivationPrice,
+      requestActivation: (state, options = {}, runtimeDeps = {}) => acquireActivation(state, options, {
+        ...deps,
+        ...runtimeDeps,
+      }),
       acquireActivation: (state, options = {}, runtimeDeps = {}) => acquireActivation(state, options, {
         ...deps,
         ...runtimeDeps,
       }),
+      reuseActivation,
       pollActivation: (state, activation, runtimeDeps = {}) => pollActivation(state, activation, {
         ...deps,
         ...runtimeDeps,
@@ -419,10 +644,32 @@
         ...deps,
         ...runtimeDeps,
       }),
+      finishActivation: (state, activation, runtimeDeps = {}) => finishActivation(state, activation, {
+        ...deps,
+        ...runtimeDeps,
+      }),
+      cancelActivation: (state, activation, runtimeDeps = {}) => cancelActivation(state, activation, {
+        ...deps,
+        ...runtimeDeps,
+      }),
+      banActivation: (state, activation, runtimeDeps = {}) => banActivation(state, activation, {
+        ...deps,
+        ...runtimeDeps,
+      }),
+      requestAdditionalSms,
       rotateActivation: (state, activation, options = {}, runtimeDeps = {}) => rotateActivation(state, activation, options, {
         ...deps,
         ...runtimeDeps,
       }),
+      prepareActivationForReuse: async () => ({
+        ok: false,
+        reason: 'prepare_unsupported',
+        message: 'MaDao 不支持自动白嫖复用准备。',
+      }),
+      canPersistReusableActivation: () => false,
+      canPreserveActivationForFreeReuse: () => false,
+      shouldUsePageResend: () => false,
+      shouldProbePageResend: () => false,
       replaceRoutingActivation: (state, activation, options = {}, runtimeDeps = {}) => replaceRoutingActivation(state, activation, options, {
         ...deps,
         ...runtimeDeps,
@@ -431,7 +678,9 @@
       extractCodeFromPollPayload,
       mapAcquirePath,
       mapTicketStatus,
+      normalizeActivation,
       normalizeActivationFromAcquire,
+      resolveCountryCandidates,
       resolveConfig: (state = {}, runtimeDeps = {}) => resolveConfig(state, {
         ...deps,
         ...runtimeDeps,
@@ -450,12 +699,22 @@
     extractCodeFromPollPayload,
     mapAcquirePath,
     mapTicketStatus,
+    normalizeActivation,
     normalizeActivationFromAcquire,
+    normalizeCountry,
+    normalizeCountryKey,
+    normalizeCountryLabel,
+    resolveActivationCountry,
     pollActivation,
     pollActivationCode,
     releaseActivation,
+    finishActivation,
+    cancelActivation,
+    banActivation,
     replaceRoutingActivation,
+    requestAdditionalSms,
     resolveConfig,
+    resolveCountryCandidates,
     rotateActivation,
   };
 });
