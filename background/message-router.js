@@ -1141,10 +1141,10 @@
               stepKey: nodeId,
             });
           }
-          await handleStepData(resolvedStep, completionPayload);
           if (isFinalNode && typeof appendAccountRunRecord === 'function') {
             await appendAccountRunRecord('success', completionState);
           }
+          await handleStepData(resolvedStep, completionPayload);
           notifyNodeComplete(nodeId, completionPayload);
           return { ok: true };
         }
